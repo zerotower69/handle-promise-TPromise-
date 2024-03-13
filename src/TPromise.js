@@ -282,7 +282,7 @@ class TPromise{
      * @return {TPromise}
      */
     static allSettled(promises){
-        //!不是数值报错
+        //!不是数组报错
         if(!Array.isArray(promises)){
             throw new TypeError('promises must be array')
         }

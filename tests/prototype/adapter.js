@@ -1,4 +1,4 @@
-const TPromise = require('../src/TPromise');
+const TPromise = require('../../src/TPromise-prototype');
 
 
 module.exports={

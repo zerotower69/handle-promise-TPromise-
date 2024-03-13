@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node tests/auto.test.js"
+    "test:class": "node tests/class/test.js",
+    "test:proto": "node tests/prototype/test.js"
   },
   "keywords": [],
   "author": "",
