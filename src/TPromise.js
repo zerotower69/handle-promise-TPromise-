@@ -128,7 +128,7 @@ class TPromise{
     }
 
     /**
-     * catch方法其实是then方法的语法糖：then(then,onRejected)
+     * catch方法其实是then方法的语法糖：then(null,onRejected)
      * @param onRejected
      * @return {TPromise}
      */
@@ -162,7 +162,7 @@ class TPromise{
     }
 
     /**
-     * 该方法是返回一个新的promise，而传入的value可能用三种情况
+     * 该方法是返回一个新的promise，而传入的value可能有三种情况
      * * 本身是一个promise或者是promise的子类
      * * 是一个thenable对象
      * * 其它：undefined|null|object(非thenable)
@@ -193,7 +193,7 @@ class TPromise{
     }
 
     /**
-     * 等待所有的promise: all fulfilled=>fulfilled,one rejected ==>rejected
+     * 等待所有的promise: all fulfilled=>fulfilled,  any rejected ==>rejected
      * @param promises
      * @return {TPromise}
      */
@@ -321,7 +321,6 @@ class TPromise{
         })
     }
 
-
 }
 
 /**
@@ -336,22 +335,28 @@ function resolvePromise(promise,data,resolve,reject){
     }
     // 多次调用resolve或reject以第一次为主，忽略后边的
     let called = false
-    if(((isObj(data)&& data!==null) || isFunc(data)) && isFunc(data.then)){
+    if(((isObj(data)&& data!==null) || isFunc(data))){
        try{
-               data.then.call(data,(value)=>{
+           const then = data.then
+           if(isFunc(then)) {
+               then.call(data, (value) => {
                    if (called) {
                        return
                    }
                    called = true
                    //递归执行，避免value是一个PromiseLike,Promise.resolve中的嵌套thenable在这里解决。
-                   resolvePromise(promise,value,resolve,reject)
-               },(reason)=>{
+                   resolvePromise(promise, value, resolve, reject)
+               }, (reason) => {
                    if (called) {
                        return
                    }
                    called = true
                    reject(reason)
-               })
+                   }
+               )
+           } else{
+               resolve(data)
+           }
        } catch (e){
            if (called) {
                return
