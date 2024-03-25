@@ -117,61 +117,118 @@ TPromise.reject =function (reason){
     })
 };
 
-TPromise.all=function (promises){
-    //参数不是数组报错
-    if(!Array.isArray(promises)){
-        throw new TypeError('promises must be array')
+TPromise.all=function (values){
+    //values不是一个可迭代对象就报错
+    if(!isIterator(values)){
+        throw new TypeError('values must be an iterable object.')
     }
     return new TPromise((resolve,reject)=>{
-        //传递空数组情况下直接fulfilled 并短路
-        if(promises.length ===0){
-            return resolve([]);
-        }
-        const results= new Array(promises.length);
+        //返回结果，all,values
+        const results= [];
+        //fulfilled 计数器
         let count =0;
-        for(let index in promises){
-            const promise = promises[index];
-            const p = TPromise.resolve(promise).then(value=>{
+        //遍历顺序
+        let index =0;
+        //使用 for...of遍历可迭代对象
+        for(const value of values){
+            //避免闭包问题
+            let resultIndex = index;
+            index++;
+            const p = TPromise.resolve(value).then(value=>{
                 //!在此保证最终返回的promise,在fulfilled时，所有的兑现值均按参数传递时的顺序
-                results[index]= value;
+                results[resultIndex]= value;
                 //fulfilled中统计次数，一旦count和传入的promises长度相等，就说明所有的promise均fulfilled了。
                 count++
-                if(count === promises.length){
+                if(count === index){
                     resolve(results)
                 }
             },(reason)=>{
                 reject(reason)
-            })
+            });
+        }
+        if(index===0){
+            //表示没有遍历，遍历对象为空
+            resolve(results)
         }
     })
 };
 
-TPromise.any=function (promises){
-    if(!Array.isArray(promises)){
-        throw new TypeError('promises must be array')
+TPromise.any=function (values){
+    if(!isIterator(values)){
+        throw new TypeError('values must be an iterable object.')
     }
     return new TPromise((resolve,reject)=>{
-        if(promises.length ===0){
-            return resolve([])
-        }
-        const results= new Array(promises.length);
-        let count =0
-        for(let index of promises){
-            const promise = promises[index]
-            TPromise.resolve(promise).then((value)=>{
+        //结果，any ===> reasons
+        const results= []
+        //计数器，统计rejected 次数
+        let count =0;
+        //迭代时下标记录
+        let index=0;
+        for(const value of values){
+            //避免闭包问题
+            let resultIndex = index;
+            index++;
+            TPromise.resolve(value).then((value)=>{
                 resolve(value)
             },reason=>{
-                results[index]=reason;
+                results[resultIndex]=reason;
                 count++
-                if(count === promises.length){
+                if(count === index){
                     reject(results)
                 }
-            })
+            });
+        }
+        //如果下标不变，说明迭代对象为空
+        if(index===0){
+            reject(results)
         }
     })
 }
 
-TPromise.allSettled=function (promises){
+TPromise.race =function (values){
+    if(!isIterator(values)){
+        throw new TypeError('values must be an iterable object.')
+    }
+    return new TPromise((resolve)=>{
+        const results = [];
+        //计数器，兑现个数统计
+        let count=0;
+        //迭代下标
+        let index=0;
+        for(const value of values){
+            //避免闭包问题
+            let resultIndex = index;
+            index++;
+            TPromise.resolve(value).then((value)=>{
+                //保证有序
+                results[resultIndex]={
+                    status:'fulfilled',
+                    value:value
+                };
+                count++;
+                if(count===index){
+                    resolve(results)
+                }
+            },(reason)=>{
+                //保证有序
+                results[resultIndex]={
+                    status:'rejected',
+                    reason:reason
+                };
+                count++;
+                if(count===index){
+                    resolve(results)
+                }
+            });
+        }
+        //可迭代对象为空
+        if(index===0){
+            resolve(results)
+        }
+    })
+}
+
+TPromise.allSettled=function (values){
     //!不是数组报错
     if(!Array.isArray(promises)){
         throw new TypeError('promises must be array')
@@ -211,20 +268,6 @@ TPromise.allSettled=function (promises){
     })
 }
 
-TPromise.race =function (promises){
-    if(!Array.isArray(promises)){
-        throw new TypeError('promises must be array')
-    }
-    return new TPromise((resolve,reject)=>{
-        for(const promise of promises){
-            TPromise.resolve(promise).then((value)=>{
-                resolve(value)
-            },(reason)=>{
-                reject(reason)
-            })
-        }
-    })
-}
 
 
 /**
@@ -274,12 +317,19 @@ function resolvePromise(promise,data,resolve,reject){
     }
 }
 
+//判断一个值是不是函数
 function isFunc(val){
     return typeof val === 'function'
 }
 
+//判断一个值是不是对象
 function isObj(val){
     return typeof val ==='object'
+}
+
+//判断一个值是不是可迭代对象
+function isIterator(val){
+    return typeof val[Symbol.iterator] === 'function'
 }
 
 module.exports=TPromise

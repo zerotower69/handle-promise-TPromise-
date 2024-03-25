@@ -10,7 +10,8 @@
 
 ## 脚本
 ```bash
-npm run test
+npm run test:class
+npm run test:proto
 ```
 ** 如有其它疑问，欢迎通过issue留言，或者加入QQ群聊（434063310）获得解答 **
 ** 觉得不错的话给我一个star吧 **
