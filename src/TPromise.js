@@ -37,14 +37,42 @@ class TPromise{
         }
         //分别构建resolve和reject函数传入
        function resolve(value){
-            if(that.status === 'pending'){
-                //只有pending时进入
-                that.status='fulfilled';
-                that.value=value;
-                that.onFulfilledCallbacks.forEach(cb=>{
-                    isFunc(cb) && cb(value)
-                })
-            }
+            //真实的resolve函数
+           function realResolveValue(value){
+               if(that.status === 'pending'){
+                   that.status='fulfilled';
+                   that.value=value;
+                   that.onFulfilledCallbacks.forEach(cb=>{
+                       isFunc(cb) && cb(value)
+                   })
+               }
+           }
+           //如果value是一个Promise
+           if(value instanceof TPromise){
+               //*核心，调用then的逻辑又是一个微任务
+               const microTask= ()=>{
+                   value.then((newValue)=>{
+                       resolve(newValue)
+                   },newReason=>{
+                       reject(newReason)
+                   })
+               }
+               //送入微任务队列
+               addMicroTask(microTask)
+           } else if(isThenable(value)){
+               //value是一个thenable对象，调用then方法，调用也是一个微任务
+               const microTask = ()=>{
+                   try{
+                       value.then.call(value,newValue=>resolve(newValue),newReason=>reject(newReason))
+                   } catch (e){
+                       reject(e)
+                   }
+               }
+               //加入微任务队列
+               addMicroTask(microTask)
+           } else{
+               realResolveValue(value)
+           }
         }
         function reject(reason){
             if(that.status === 'pending'){
@@ -80,30 +108,35 @@ class TPromise{
        const promise= new TPromise(function(resolve,reject){
            //由上一个promise的状态决定新的promise是否立刻调用
 
-           //方法封装
-           //! 以下微任务也就是两个步骤，执行回调取值，得出结果就进一步判断结果的值的类型情况进一步兑现新创建的promise,
-           //! 如果捕获到错误就直接reject
+           //该方法在promise的状态变为fulfilled，也就是兑现后调用
            function fulfilledCallback(value){
-               queueMicrotask(()=>{
-                   //!这里的逻辑块就是微任务
+               //在这个微任务中取出onFulFilled的执行结果，并解决循环依赖（A等A完成）,返回为thenable的情况，如捕获到报错或者异常
+               //直接决拒绝这个此promise
+               const microTask = ()=>{
                    try{
                        const result = onFulfilled(value);
                        resolvePromise(promise,result,resolve,reject)
                    } catch (e){
                        reject(e)
                    }
-               })
+               }
+               //任务送入微任务队列中
+               addMicroTask(microTask)
            }
+           //该方法在promise的状态变为rejected，也就是拒绝后调用
            function rejectedCallback(reason){
-               queueMicrotask(()=>{
-                   //!这里的逻辑块就是微任务
+               //在这个微任务中取出onRejected的执行结果，并解决循环依赖（A等A完成）,返回为thenable的情况，如捕获到报错或者异常
+               //直接决拒绝这个此promise
+               const microTask = ()=>{
                    try{
                        const result = onRejected(reason);
                        resolvePromise(promise,result,resolve,reject)
                    } catch (e){
                        reject(e)
                    }
-               })
+               };
+               //送入微任务队列
+               addMicroTask(microTask)
            }
            switch (that.status){
                //同步情况：调用queueMicroTask本身这个操作是同步的
@@ -173,8 +206,8 @@ class TPromise{
         if(value instanceof TPromise){
             return value
         }
-       return new TPromise((resolve)=>{
-           //thenable的情况实际上通过 resolvePromise完成了
+        //统一由resolve处理复杂情况
+       return new TPromise((resolve,reject)=>{
            resolve(value)
        })
     }
@@ -346,51 +379,74 @@ class TPromise{
 }
 
 /**
+ * 递归解决resolve中的value
  * @param promise
  * @param data
  * @param resolve
  * @param reject
  */
 function resolvePromise(promise,data,resolve,reject){
+    //*2.3.1
     if(data === promise){
        return reject(new TypeError('禁止循环引用'));
     }
-    // 多次调用resolve或reject以第一次为主，忽略后边的
-    let called = false
-    if(((isObj(data)&& data!==null) || isFunc(data))){
-        //这部分的写法是由Promise A+规范规定的
-       try{
-           const then = data.then
-           if(isFunc(then)) {
-               then.call(data, (value) => {
-                   if (called) {
-                       return
-                   }
-                   called = true
-                   //递归执行，避免value是一个PromiseLike,Promise.resolve中的嵌套thenable在这里解决。
-                   resolvePromise(promise, value, resolve, reject)
-               }, (reason) => {
-                   if (called) {
-                       return
-                   }
-                   called = true
-                   reject(reason)
-                   }
-               )
-           } else{
-               resolve(data)
-           }
-       } catch (e){
-           if (called) {
-               return
-           }
-           called = true
-           reject(e)
-       }
+    // 多次调用resolve或reject以第一次为主，忽略后边的,防止多次调用
+    let called = false;
+    //*2.3.2: 如果x是一个promise,以相同的方式完成兑现或者拒绝
+    //*2.3.3.2 :如果检索then属性失败，使用失败原因拒绝
+    //*2.3.3
+    if(isObj(data) || isFunc(data)){
+        try {
+            const then = data.then;
+            if (isFunc(then)) {
+                //*2.3.3.3
+                then.call(data, (value) => {
+                        if (called) {
+                            return
+                        }
+                        called = true
+                        //递归执行，避免value是一个PromiseLike,Promise.resolve中的嵌套thenable在这里解决。
+                        resolvePromise(promise, value, resolve, reject)
+                    }, (reason) => {
+                        if (called) {
+                            return
+                        }
+                        called = true
+                        reject(reason)
+                    }
+                )
+
+            } else {
+                resolve(data)
+            }
+        } catch (e){
+            //*2.3.3.2: 检测data.then发生异常
+            //*2.3.3.3.4 : 调用data.then发生异常
+            if(called){
+                //*2.3.3.3.4.1 resolve或者reject已经被调用忽略
+                return
+            }
+            called=false
+            //*2.3.3.3.4.2 拒绝
+            reject(e)
+        }
     } else{
-        //data是null,undefined,普通引用值等
         resolve(data)
     }
+}
+
+/**
+ * 将一个任务回调送入微任务队列
+ * @param {(...args:any[])=>any} taskCallback
+ */
+function addMicroTask(taskCallback){
+    if(isFunc(taskCallback)){
+        queueMicrotask(taskCallback)
+    }
+}
+
+function isThenable(value){
+     return !!((isObj(value) || isFunc(value)) && typeof value.then === 'function');
 }
 
 //判断一个值是不是函数
@@ -400,7 +456,7 @@ function isFunc(val){
 
 //判断一个值是不是对象
 function isObj(val){
-    return typeof val ==='object'
+    return typeof val ==='object' && val!==null
 }
 
 //判断一个值是不是可迭代对象
